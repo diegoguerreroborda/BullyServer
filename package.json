@@ -1,0 +1,26 @@
+{
+  "name": "BullyServer",
+  "version": "1.0.0",
+  "description": "",
+  "main": "main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diegoguerreroborda/BullyServer.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/diegoguerreroborda/BullyServer/issues"
+  },
+  "homepage": "https://github.com/diegoguerreroborda/BullyServer#readme",
+  "dependencies": {
+    "axios": "^0.21.1",
+    "express": "^4.17.1",
+    "node-cron": "^3.0.0",
+    "shelljs": "^0.8.4"
+  }
+}
