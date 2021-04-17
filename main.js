@@ -3,17 +3,18 @@ const axios = require('axios');
 //const cors = require('cors');
 const shell = require('shelljs');
 var  cron  = require('node-cron');
+const { response } = require('express');
 
-const port = 3000;
+const port = process.argv[2];
 
 const app = express()
 //app.use(cors())
 
 const id = port;
-let servers = [{path: "http://localhost:3000/", alive: false}, {path: "http://localhost:3001/", alive: false}];
+let servers = [{path: "http://localhost:3002/", alive: false}, {path: "http://localhost:3001/", alive: false}, {path: "http://localhost:3000/", alive: false}];
 //let servers = []
-let isLeader = true;
-let leaderHost = 'http://localhost:3000/';
+let isLeader = false;
+let leaderHost = 'http://localhost:3002/';
 let serversHiguer = [];
 
 //Envia latidos al lider cada 15 segundos
@@ -32,37 +33,47 @@ var taskheartbeat = cron.schedule('*/25 * * * * *', () => {
     }
 });
 
-function sendRequestToAll(){
+async function sendRequestToAll(){
+    console.log('Enviar peticiones a todos')
     serversHiguer = [];
     for (const server in servers) {
         try {
             response = await axios(`${servers[server].path}/id_server`)
+            console.log(response)
+            console.log('data', response.data)
             servers[server].alive = true;
             //Aqui busca solo los mayores que él.
             if(response > id){
-                serversHiguer.push({path: servers[server].path, id = response});
+                serversHiguer.push({path: servers[server].path, id : response});
             }
         } catch(err) {
             //servers[server].alive = false;
         }
     }
     chooseHiguer();
-    res.send(textServers);
+    //res.send(textServers);
 }
 
 function chooseHiguer(){
+    console.log('Escoger al mayor')
     let numberHigh = 0;
-    for (const serverHigh in serversHiguer) {
-        if(serversHiguer[serverHigh].id > numberHigh){
-            numberHigh = servers[server].id
+    if(serversHiguer.length == 0){
+        console.log('El es el server mayor')
+    }else{
+        for (const serverHigh in serversHiguer) {
+            if(serversHiguer[serverHigh].id > numberHigh){
+                numberHigh = servers[server].id
+            }
         }
+        sendHeartBeatToLeader(numberHigh)
     }
-    sendHeartBeatToLeader(numberHigh)
 }
 
-function sendHeartBeatToLeader(numberHigh){
+async function sendHeartBeatToLeader(numberHigh){
+    console.log('Escoger al server mayor')
     for (const serverHigh in serversHiguer) {
         if(serversHiguer[serverHigh].id == numberHigh){
+            console.log(serversHiguer[serverHigh].path)
             axios.get(serversHiguer[serverHigh].path)
             //Le dice que el va a ser el nuevo lider.
             .then(function (response) {
