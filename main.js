@@ -4,25 +4,26 @@ const axios = require('axios');
 const shell = require('shelljs');
 var  cron  = require('node-cron');
 const bodyParser = require('body-parser');
-//const { response } = require('express');
 
-const port = process.argv[2];
+const port = 3000;
 
 const app = express()
 app.use(bodyParser.json())
 //app.use(cors())
 
 const id = port;
-let servers = [{path: "http://localhost:3002/", alive: false, id:3002}, {path: "http://localhost:3001/", alive: false, id: 3001}, {path: "http://localhost:3000/", alive: false, id: 3000}];
-//let servers = []
-let isLeader = false;
-let leaderHost = 'http://localhost:3002/';
+//let servers = [{path: "http://localhost:3000/", alive: false, id:3000, isLeader: true}];
+//let servers = [{path: "http://localhost:3000/", alive: true, id: 3000, isLeader:true}, {path: "http://localhost:2999/", alive: true, id: 2999, isLeader:false}, {path: "http://localhost:2998/", alive: true, id: 2998, isLeader:false}];
+let servers = []
+let isLeader = true;
+let leaderHost = '';
 let serversHiguer = [];
 
 //Envia latidos al lider cada 15 segundos
 //Los latidos se deben hacer en un tiempo aleatorio.
 var taskheartbeat = cron.schedule('*/25 * * * * *', async () => {
     console.log('Cada cierto tiempo hacerle ping al lider')
+    console.log(servers)
     if(!isLeader){
         await axios.get(leaderHost)
         .then(function (response) {
@@ -47,13 +48,15 @@ async function getIds(){
 }
 
 //Implementado por el que inicia la busqueda
-function chooseHiguer(){
+async function chooseHiguer(){
     console.log('Escoger al mayor')
     let numberHigh = 0;
     if(serversHiguer.length == 0){
         console.log('El es el server mayor')
-        leaderHost = `http://localhost:${port}`
+        leaderHost = `http://localhost:${port}/`
         isLeader = true;
+        await findHost(`http://localhost:${port}/`)
+        //Hacer un for que busque eso
         sendLeader('new_leader')
     }else{
         for (const serverHigh in serversHiguer) {
@@ -62,6 +65,16 @@ function chooseHiguer(){
             }
         }
         sendHeartBeatToLeader(numberHigh)
+    }
+}
+
+function findHost(host) {
+    console.log('Aquiii')
+    for (const server in servers) {
+        if(servers[server].path == host){
+            console.log('no se si entra')
+            servers[server].isLeader = true;
+        }
     }
 }
 
@@ -78,12 +91,11 @@ async function getRequest(urlFinal){
                     serversHiguer.push({path: servers[server].path, id: servers[server].id})
                 }
             }
-            //console.log(response.data)
-            //servers[server].alive = true;
-            //Aqui busca solo los Enviar peticiones a todos
+            servers[server].alive = true;
         } catch(err) {
             console.log('err.Error')
-            //servers[server].alive = false;
+            servers[server].alive = false;
+            servers[server].isLeader = false;
         }
     }
 }
@@ -97,7 +109,8 @@ async function sendLeader(afterUrl){
             method: 'post',
             url : `${servers[host].path}${afterUrl}`,
             data: {
-              leader: leaderHost
+              leader: leaderHost,
+              servers: servers
             }
         }).then(response => {
             console.log('Resultado:', response.data);
@@ -105,7 +118,6 @@ async function sendLeader(afterUrl){
             getRequest('heartbeat_start')
         }).catch(err => {
             console.log("Apagadooo")
-            //servers[host].alive = false;
         });
     }
 }
@@ -113,12 +125,12 @@ async function sendLeader(afterUrl){
 //Implementado por el que inicia la busqueda
 async function sendHeartBeatToLeader(numberHigh){
     console.log('Escoger al server mayor')
-    for (const serverHigh in serversHiguer) {
-        if(serversHiguer[serverHigh].id == numberHigh){
-            console.log(serversHiguer[serverHigh].path)
-            leaderHost = serversHiguer[serverHigh].path
-            await axios.get(`${serversHiguer[serverHigh].path}leader`)
-            //Comenzar otra vez con los latidos
+    for (const serverHigh in servers) {
+        if(servers[serverHigh].id == numberHigh){
+            console.log(servers[serverHigh].path)
+            leaderHost = servers[serverHigh].path
+            servers[serverHigh].isLeader = true;
+            await axios.get(`${servers[serverHigh].path}leader`)
             .then(function (response) {
                 console.log(response.data)
             }).catch(function (error) {
@@ -133,8 +145,9 @@ async function sendHeartBeatToLeader(numberHigh){
 
 app.post('/new_leader', (req, res) => {
     leaderHost = req.body.leader;
+    servers = req.body.servers;
     console.log('leader is: ', leaderHost)
-    res.sendStatus(200)
+    res.send(leaderHost)
 })
 
 app.get('/', (req, res) => {
@@ -144,6 +157,7 @@ app.get('/', (req, res) => {
 app.get('/id_server', (req, res) => {
     res.json(id)
 })
+//servers.push({path:req.body.server, alive : true, id:portInstance})
 
 app.get('/leader', (req, res) => {
     isLeader = true;
@@ -160,6 +174,37 @@ app.get('/heartbeat_stop', (req, res) => {
 app.get('/heartbeat_start', (req, res) => {
     taskheartbeat.start();
     res.sendStatus(200)
+})
+
+app.post('/new_server', (req, res) => {
+    console.log('El nuevo server es:', req.body.servers)
+    if(servers.length == 0){
+        console.log('Crear el lider')
+        isLeader = true
+        //currentServer = {path:`http://localhost:${portInstance}/`, alive : true, id:portInstance, isLeader:true}
+        leaderHost = req.body.path
+        servers.push({path: req.body.path, alive: true, id: req.body.id, isLeader: true})
+        //servers = req.body.servers
+    }else{
+        console.log('Ya hay un lider')
+        isLeader = false
+        servers = req.body.servers
+        //servers.push({path: req.body.path, alive: true, id: req.body.id, isLeader: false})
+        //servers.push({path:req.data.server, alive : true, id:portInstance})
+        //currentServer = {path:`http://localhost:${portInstance}/`, alive : true, id:portInstance, isLeader:false}
+    }
+    //servers.push(req.body.server)
+    //servers = req.data.servers
+    res.sendStatus(200)
+})
+
+app.get('/list_servers', (req, res) => {
+    console.log('Lista de servidores', servers)
+    res.send(servers)
+})
+
+app.get('/leader_called', (req, res) => {
+    res.send(leaderHost)
 })
 
 app.listen(port, () => {
