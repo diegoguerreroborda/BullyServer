@@ -1,27 +1,31 @@
 const express = require('express');
 const axios = require('axios');
-//const cors = require('cors');
 const shell = require('shelljs');
 var  cron  = require('node-cron');
 const bodyParser = require('body-parser');
 
-const port = 3000;
+//const PORT = process.argv[2];
+const PORT = 3000;
 
 const app = express()
 app.use(bodyParser.json())
-//app.use(cors())
 
-const id = port;
-//let servers = [{path: "http://localhost:3000/", alive: false, id:3000, isLeader: true}];
-//let servers = [{path: "http://localhost:3000/", alive: true, id: 3000, isLeader:true}, {path: "http://localhost:2999/", alive: true, id: 2999, isLeader:false}, {path: "http://localhost:2998/", alive: true, id: 2998, isLeader:false}];
+let id = PORT;
 let servers = []
+//let servers = [{path: "http://localhost:3000/", alive: true, id: 3000, isLeader:true}, {path: "http://localhost:2999/", alive: true, id: 2999, isLeader:false}, {path: "http://localhost:2998/", alive: true, id: 2998, isLeader:false}];
 let isLeader = true;
-let leaderHost = '';
+let leaderHost = 'http://172.17.0.1:4000/';
 let serversHiguer = [];
 
-//Envia latidos al lider cada 15 segundos
+let monitoring = [];
+let countM = 0;
+
+function getRandomArbitrary(min, max) {
+    return Math.random() * (max - min) + min;
+  }
+
 //Los latidos se deben hacer en un tiempo aleatorio.
-var taskheartbeat = cron.schedule('*/25 * * * * *', async () => {
+var taskheartbeat = cron.schedule(`*/${getRandomArbitrary(5,10)} * * * * *`, async () => {
     console.log('Cada cierto tiempo hacerle ping al lider')
     console.log(servers)
     if(!isLeader){
@@ -31,6 +35,7 @@ var taskheartbeat = cron.schedule('*/25 * * * * *', async () => {
             console.log(response.data)
         }).catch(async function (error) {
             //Parar todos los latidos
+            monitoring.push({time:Date.now, action:'Parar latidos', server:id})
             taskheartbeat.stop();
             await getRequest('heartbeat_stop')
             await getIds();
@@ -53,10 +58,9 @@ async function chooseHiguer(){
     let numberHigh = 0;
     if(serversHiguer.length == 0){
         console.log('El es el server mayor')
-        leaderHost = `http://localhost:${port}/`
+        leaderHost = `http://172.17.0.1:${id}/`
         isLeader = true;
-        await findHost(`http://localhost:${port}/`)
-        //Hacer un for que busque eso
+        await findHost(`http://172.17.0.1:${id}/`)
         sendLeader('new_leader')
     }else{
         for (const serverHigh in serversHiguer) {
@@ -72,7 +76,6 @@ function findHost(host) {
     console.log('Aquiii')
     for (const server in servers) {
         if(servers[server].path == host){
-            console.log('no se si entra')
             servers[server].isLeader = true;
         }
     }
@@ -100,11 +103,27 @@ async function getRequest(urlFinal){
     }
 }
 
+async function sendToCoordinator() {
+    await axios({
+        method: 'post',
+        url : `http://172.17.0.1:3050/update`,
+        data: {
+          servers: servers,
+          leader: leaderHost
+        }
+    }).then(response => {
+        console.log('Resultado:', response.data)
+    }).catch(err => {
+        console.log("No existe")
+    });
+}
+
 //Implementado por el que inicia la busqueda
 async function sendLeader(afterUrl){
     console.log("Enviando lider a todos...")
     for (const host in servers) {
         console.log(servers[host].path)
+        monitoring.push({time:Date.now, action:`Lider: ${leaderHost}`, server:id})
         await axios({
             method: 'post',
             url : `${servers[host].path}${afterUrl}`,
@@ -125,16 +144,24 @@ async function sendLeader(afterUrl){
 //Implementado por el que inicia la busqueda
 async function sendHeartBeatToLeader(numberHigh){
     console.log('Escoger al server mayor')
-    for (const serverHigh in servers) {
-        if(servers[serverHigh].id == numberHigh){
-            console.log(servers[serverHigh].path)
-            leaderHost = servers[serverHigh].path
-            servers[serverHigh].isLeader = true;
-            await axios.get(`${servers[serverHigh].path}leader`)
-            .then(function (response) {
-                console.log(response.data)
-            }).catch(function (error) {
-                console.log('Error ni el hp')
+    for (const server in servers) {
+        if(servers[server].id == numberHigh){
+            console.log(servers[server].path)
+            leaderHost = servers[server].path
+            servers[server].isLeader = true;
+            console.log('Serverhigh', server)
+            //Hacer un post enviandole
+            await axios({
+                method: 'post',
+                url : `${servers[server].path}leader`,
+                data: {
+                  high: server
+                }
+            }).then(response => {
+                console.log('Resultado:', response.data);
+                taskheartbeat.start()
+            }).catch(err => {
+                console.log("Error")
             });
         }
     }
@@ -157,10 +184,11 @@ app.get('/', (req, res) => {
 app.get('/id_server', (req, res) => {
     res.json(id)
 })
-//servers.push({path:req.body.server, alive : true, id:portInstance})
 
-app.get('/leader', (req, res) => {
+app.post('/leader', async (req, res) => {
+    servers[req.body.high].isLeader = true;
     isLeader = true;
+    await sendToCoordinator()
     res.sendStatus(200)
 })
 
@@ -172,30 +200,36 @@ app.get('/heartbeat_stop', (req, res) => {
 
 //Inicia los latidos al lider
 app.get('/heartbeat_start', (req, res) => {
+    monitoring.push({time:Date.now, action:`Activando latidos`, server:id})
     taskheartbeat.start();
     res.sendStatus(200)
 })
 
 app.post('/new_server', (req, res) => {
+    
     console.log('El nuevo server es:', req.body.servers)
-    if(servers.length == 0){
+    servers = req.body.servers
+    id = req.body.id
+    monitoring.push({time:Date.now, action:`Nuevo servidor creado`, server:id})
+    if(servers.length == 1){
         console.log('Crear el lider')
         isLeader = true
-        //currentServer = {path:`http://localhost:${portInstance}/`, alive : true, id:portInstance, isLeader:true}
         leaderHost = req.body.path
-        servers.push({path: req.body.path, alive: true, id: req.body.id, isLeader: true})
-        //servers = req.body.servers
     }else{
         console.log('Ya hay un lider')
         isLeader = false
-        servers = req.body.servers
-        //servers.push({path: req.body.path, alive: true, id: req.body.id, isLeader: false})
-        //servers.push({path:req.data.server, alive : true, id:portInstance})
-        //currentServer = {path:`http://localhost:${portInstance}/`, alive : true, id:portInstance, isLeader:false}
+        leaderHost = req.body.leader
     }
-    //servers.push(req.body.server)
-    //servers = req.data.servers
+    res.send(servers)
+})
+
+app.post('/update', (req, res) => {
+    servers = req.body.servers
     res.sendStatus(200)
+})
+
+app.get('/update', (req, res) => {
+    res.send(servers)
 })
 
 app.get('/list_servers', (req, res) => {
@@ -207,6 +241,10 @@ app.get('/leader_called', (req, res) => {
     res.send(leaderHost)
 })
 
-app.listen(port, () => {
-    console.log(`Example app listening at http://localhost:${port}`)
+app.get('/monitoring', (req, res) => {
+    res.send(monitoring)
+})
+
+app.listen(PORT, () => {
+    console.log(`Example app listening at http://172.17.0.1:${PORT}`)
 })
