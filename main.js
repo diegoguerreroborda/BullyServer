@@ -19,13 +19,14 @@ let serversHiguer = [];
 
 let monitoring = [];
 let countM = 0;
+let timeBeat = getRandomArbitrary(4,9);
 
 function getRandomArbitrary(min, max) {
     return Math.random() * (max - min) + min;
   }
 
 //Los latidos se deben hacer en un tiempo aleatorio.
-var taskheartbeat = cron.schedule(`*/${getRandomArbitrary(5,10)} * * * * *`, async () => {
+var taskheartbeat = cron.schedule(`*/${timeBeat} * * * * *`, async () => {
     console.log('Cada cierto tiempo hacerle ping al lider')
     console.log(servers)
     if(!isLeader){
